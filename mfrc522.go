@@ -2,6 +2,7 @@ package mfrc522
 
 import (
 	"github.com/stianeikeland/go-rpio/v4"
+	"github.com/phires/go-mfrc522/pcd"
 	"fmt"
 	"log"
 	"time"
@@ -25,10 +26,6 @@ import (
 	Spi0 (phy) |  24 |  26 |   - |   23 |   19 |   21 |  22 |
 */
 
-// PCDRegister MFRC522 registers. Described in chapter 9 of the datasheet.
-type PCDRegister byte
-// PCDCommand godoc
-type PCDCommand byte
 // PCDRxGain godoc
 type PCDRxGain byte
 // PICCCommand godoc
@@ -56,95 +53,6 @@ type UID struct {
 type MifareKey struct {
 	keyByte	[uint8(MifareKeySize)]byte
 }
-
-// When using SPI all addresses are shifted one bit left in the "SPI address byte" (section 8.1.2.3)
-const (
-	// Page 0: Command and status
-	//						  0x00			// reserved for future use
-	CommandReg 		PCDRegister		= 0x01 << 1		// starts and stops command execution
-	ComIEnReg 		PCDRegister		= 0x02 << 1		// enable and disable interrupt request control bits
-	DivIEnReg		PCDRegister		= 0x03 << 1 	// enable and disable interrupt request control bits
-	ComIrqReg		PCDRegister		= 0x04 << 1 	// interrupt request bits
-	DivIrqReg		PCDRegister		= 0x05 << 1 	// interrupt request bits
-	ErrorReg		PCDRegister		= 0x06 << 1 	// error bits showing the error status of the last command executed 
-	Status1Reg		PCDRegister		= 0x07 << 1 	// communication status bits
-	Status2Reg		PCDRegister		= 0x08 << 1 	// receiver and transmitter status bits
-	FIFODataReg		PCDRegister		= 0x09 << 1 	// input and output of 64 byte FIFO buffer
-	FIFOLevelReg	PCDRegister		= 0x0A << 1 	// number of bytes stored in the FIFO buffer
-	WaterLevelReg	PCDRegister		= 0x0B << 1 	// level for FIFO underflow and overflow warning
-	ControlReg		PCDRegister		= 0x0C << 1 	// miscellaneous control registers
-	BitFramingReg	PCDRegister		= 0x0D << 1 	// adjustments for bit-oriented frames
-	CollReg			PCDRegister		= 0x0E << 1 	// bit position of the first bit-collision detected on the RF interface
-	//						  0x0F			// reserved for future use
-	
-	// Page 1: Command
-	// 						  0x10			// reserved for future use
-	ModeReg			PCDRegister		= 0x11 << 1 	// defines general modes for transmitting and receiving 
-	TxModeReg		PCDRegister		= 0x12 << 1 	// defines transmission data rate and framing
-	RxModeReg		PCDRegister		= 0x13 << 1 	// defines reception data rate and framing
-	TxControlReg	PCDRegister		= 0x14 << 1 	// controls the logical behavior of the antenna driver pins TX1 and TX2
-	TxASKReg		PCDRegister		= 0x15 << 1 	// controls the setting of the transmission modulation
-	TxSelReg		PCDRegister		= 0x16 << 1 	// selects the internal sources for the antenna driver
-	RxSelReg		PCDRegister		= 0x17 << 1 	// selects internal receiver settings
-	RxThresholdReg	PCDRegister		= 0x18 << 1 	// selects thresholds for the bit decoder
-	DemodReg		PCDRegister		= 0x19 << 1 	// defines demodulator settings
-	// 						  0x1A			// reserved for future use
-	// 						  0x1B			// reserved for future use
-	MfTxReg			PCDRegister		= 0x1C << 1 	// controls some MIFARE communication transmit parameters
-	MfRxReg			PCDRegister		= 0x1D << 1 	// controls some MIFARE communication receive parameters
-	// 						  0x1E			// reserved for future use
-	SerialSpeedReg	PCDRegister		= 0x1F << 1 	// selects the speed of the serial UART interface
-	
-	// Page 2: Configuration
-	// 						  0x20			// reserved for future use
-	CRCResultRegH	PCDRegister		= 0x21 << 1 	// shows the MSB and LSB values of the CRC calculation
-	CRCResultRegL	PCDRegister		= 0x22 << 1 
-	// 						  0x23			// reserved for future use
-	ModWidthReg		PCDRegister		= 0x24 << 1 	// controls the ModWidth setting?
-	// 						  0x25			// reserved for future use
-	RFCfgReg		PCDRegister		= 0x26 << 1 	// configures the receiver gain
-	GsNReg			PCDRegister		= 0x27 << 1 	// selects the conductance of the antenna driver pins TX1 and TX2 for modulation 
-	CWGsPReg		PCDRegister		= 0x28 << 1 	// defines the conductance of the p-driver output during periods of no modulation
-	ModGsPReg		PCDRegister		= 0x29 << 1 	// defines the conductance of the p-driver output during periods of modulation
-	TModeReg		PCDRegister		= 0x2A << 1 	// defines settings for the internal timer
-	TPrescalerReg	PCDRegister		= 0x2B << 1 	// the lower 8 bits of the TPrescaler value. The 4 high bits are in TModeReg.
-	TReloadRegH		PCDRegister		= 0x2C << 1 	// defines the 16-bit timer reload value
-	TReloadRegL		PCDRegister		= 0x2D << 1 
-	TCounterValueRegH	PCDRegister	= 0x2E << 1 	// shows the 16-bit timer value
-	TCounterValueRegL	PCDRegister	= 0x2F << 1 
-	
-	// Page 3: Test Registers
-	// 						  0x30			// reserved for future use
-	TestSel1Reg		PCDRegister		= 0x31 << 1 	// general test signal configuration
-	TestSel2Reg		PCDRegister		= 0x32 << 1		// general test signal configuration
-	TestPinEnReg	PCDRegister		= 0x33 << 1		// enables pin output driver on pins D1 to D7
-	TestPinValueReg	PCDRegister		= 0x34 << 1 	// defines the values for D1 to D7 when it is used as an I/O bus
-	TestBusReg		PCDRegister		= 0x35 << 1 	// shows the status of the internal test bus
-	AutoTestReg		PCDRegister		= 0x36 << 1 	// controls the digital self-test
-	VersionReg		PCDRegister		= 0x37 << 1 	// shows the software version
-	AnalogTestReg	PCDRegister		= 0x38 << 1 	// controls the pins AUX1 and AUX2
-	TestDAC1Reg		PCDRegister		= 0x39 << 1 	// defines the test value for TestDAC1
-	TestDAC2Reg		PCDRegister		= 0x3A << 1 	// defines the test value for TestDAC2
-	TestADCReg		PCDRegister		= 0x3B << 1		// shows the value of ADC I and Q channels
-	// 						  0x3C			// reserved for production tests
-	// 						  0x3D			// reserved for production tests
-	// 						  0x3E			// reserved for production tests
-	// 						  0x3F			// reserved for production tests
-)
-
-// MFRC522 commands. Described in chapter 10 of the datasheet.
-const (
-	PCDIdle				PCDCommand	= 0x00		// no action, cancels current command execution
-	PCDMem				PCDCommand	= 0x01		// stores 25 bytes into the internal buffer
-	PCDGenerateRandomID	PCDCommand	= 0x02		// generates a 10-byte random ID number
-	PCDCalcCRC			PCDCommand	= 0x03		// activates the CRC coprocessor or performs a self-test
-	PCDTransmit			PCDCommand	= 0x04		// transmits data from the FIFO buffer
-	PCDNoCmdChange		PCDCommand	= 0x07		// no command change, can be used to modify the CommandReg register bits without affecting the command, for example, the PowerDown bit
-	PCDReceive			PCDCommand	= 0x08		// activates the receiver circuits
-	PCDTransceive 		PCDCommand	= 0x0C		// transmits data from FIFO buffer to antenna and automatically activates the receiver after transmission
-	PCDMFAuthent 		PCDCommand	= 0x0E		// performs the MIFARE standard authentication as a reader
-	PCDSoftReset		PCDCommand	= 0x0F		// resets the MFRC522
-)
 
 // MFRC522 RxGain[2:0] masks, defines the receiver's signal voltage gain factor (on the PCD).
 // Described in 9.3.3.6 / table 98 of the datasheet at http://www.nxp.com/documents/data_sheet/MFRC522.pdf
@@ -240,7 +148,7 @@ func Init(spiSlave SpiSlave) {
 	if err := rpio.Open(); err != nil {
 		panic(err)
 	}
-	rpio.SpiSpeed(1000000)
+	rpio.SpiSpeed(500000)
 	resetPin = rpio.Pin(25)
 	if err := rpio.SpiBegin(rpio.Spi0); err != nil {
 		panic(err)
@@ -260,24 +168,24 @@ func Init(spiSlave SpiSlave) {
 		hardReset = true
 	}
 	if !hardReset {
-		PCDReset()
+		pcd.Reset()
 	}
 
 	log.Println("PCDInit          | Reset baud rates")
-	PCDWriteValueRegister(TxModeReg, 0x00)
-	PCDWriteValueRegister(RxModeReg, 0x00)
+	pcd.WriteValueRegister(pcd.TxModeReg, 0x00)
+	pcd.WriteValueRegister(pcd.RxModeReg, 0x00)
 	//log.Println("PCDInit          | Reset ModWidthReg")
 	//PCDWriteValueRegister(ModWidthReg, 0x26)
 
-	PCDWriteValueRegister(TModeReg, 0x8D)	
-	PCDWriteValueRegister(TPrescalerReg, 0x3E)	
-	PCDWriteValueRegister(TReloadRegL, 30)
-	PCDWriteValueRegister(TReloadRegH, 0)	
+	pcd.WriteValueRegister(pcd.TModeReg, 0x8D)	
+	pcd.WriteValueRegister(pcd.TPrescalerReg, 0x3E)	
+	pcd.WriteValueRegister(pcd.TReloadRegL, 30)
+	pcd.WriteValueRegister(pcd.TReloadRegH, 0)	
 	
-	PCDWriteValueRegister(TxASKReg, 0x40)		// Default 0x00. Force a 100 % ASK modulation independent of the ModGsPReg register setting
-	PCDWriteValueRegister(ModeReg, 0x3D)		// Default 0x3F. Set the preset value for the CRC coprocessor for the CalcCRC command to 0x6363 (ISO 14443-3 part 6.2.4)
+	pcd.WriteValueRegister(pcd.TxASKReg, 0x40)		// Default 0x00. Force a 100 % ASK modulation independent of the ModGsPReg register setting
+	pcd.WriteValueRegister(pcd.ModeReg, 0x3D)		// Default 0x3F. Set the preset value for the CRC coprocessor for the CalcCRC command to 0x6363 (ISO 14443-3 part 6.2.4)
 	//PCDAntennaOff()
-	PCDAntennaOn()								// Enable the antenna driver pins TX1 and TX2 (they were disabled by the reset)
+	pcd.AntennaOn()								// Enable the antenna driver pins TX1 and TX2 (they were disabled by the reset)
 	log.Println("PCDInit          | Init done")
 }
 
@@ -288,98 +196,13 @@ func Dispose() {
 	rpio.Close()
 }
 
-// PCDSendCommand sends a single command to MFRC522
-func PCDSendCommand(cmd PCDCommand) error {
-	log.Printf("PCDSendCommand   | Command  %#02x\n", cmd)
-	rpio.SpiTransmit(byte(CommandReg))				// MSB == 0 is for writing. LSB is not used in address. Datasheet section 8.1.2.3.
-	rpio.SpiTransmit(byte(cmd))
-	return nil
-}
 
-// PCDWriteValueRegister writes a single byte to a register
-func PCDWriteValueRegister(reg PCDRegister, value byte) error {
-	log.Printf("PCDWriteRegister | Register %#02x | Value  %#02x\n", reg, value)
-	rpio.SpiTransmit(byte(reg))				// MSB == 0 is for writing. LSB is not used in address. Datasheet section 8.1.2.3.
-	rpio.SpiTransmit(value)
-	return nil
-} 
 
-// PCDWriteValuesRegister Writes a number of bytes to the specified register in the MFRC522 chip.
-// The interface is described in the datasheet section 8.1.2.
-func PCDWriteValuesRegister(reg PCDRegister, values []byte) error {
-	var count int = len(values)
-	s := dumpByteArray(values)
-	log.Printf("PCDWriteRegister | Register %#02x | Length %d | Value  %s\n", reg, count, s)
-
-	rpio.SpiTransmit(byte(reg))				// MSB == 0 is for writing. LSB is not used in address. Datasheet section 8.1.2.3.
-	rpio.SpiTransmit(values...)
-	
-	return nil
-} 
-
-// PCDReadRegister reads a single byte from a register
-func PCDReadRegister(reg PCDRegister) (byte, error) {
-	buffer := []byte{ 0x80 | (byte(reg) & 0x7E) } 	// MSB == 1 is for reading. LSB is not used in address. Datasheet section 8.1.2.3.
-	rpio.SpiExchange(buffer)		
-	log.Printf("PCDReadRegister  | Register %#02x | Result %#02x\n", reg, buffer[0])	
-	return buffer[0], nil
-} 
-
-// PCDClearRegisterBitMask  godoc
-func PCDClearRegisterBitMask(reg PCDRegister, mask byte) error {
-	tmp, err := PCDReadRegister(reg);
-	if err != nil {
-		return err
-	}
-	PCDWriteValueRegister(reg, tmp & (^mask));		// clear bit mask
-	return nil
-} 
-
-// PCDSetRegisterBitMask  godoc
-func PCDSetRegisterBitMask(reg PCDRegister, mask byte) error {
-	tmp, err := PCDReadRegister(reg);
-	if err != nil {
-		return err
-	}
-	PCDWriteValueRegister(reg, tmp | mask);		
-	return nil
-} 
-
-// PCDReset issues the SoftReset command.
-func PCDReset() {
-	PCDWriteValueRegister(CommandReg, byte(PCDSoftReset))	
-	// The datasheet does not mention how long the SoftRest command takes to complete.
-	// But the MFRC522 might have been in soft power-down mode (triggered by bit 4 of CommandReg) 
-	// Section 8.8.2 in the datasheet says the oscillator start-up time is the start up time of the crystal + 37,74μs. Let us be generous: 50ms.
-	var count uint8
-
-	for {
-		v, err := PCDReadRegister(CommandReg)
-		if !((v & (1 << 4)) == 0 && count < 3) || err != nil  {
-			break
-		}
-		count = count + 1
-		time.Sleep(time.Millisecond*50)
-	}
-}
-
-// PCDAntennaOn turns on the antenna if it is disabled currently
-func PCDAntennaOn() {
-	value, _ := PCDReadRegister(TxControlReg)
-	log.Printf("PCDAntennaOn     | Antenna status %#02x\n", value & 0x03)	
-	if ((value & 0x03) != 0x03) {
-		PCDWriteValueRegister(TxControlReg, value | 0x03)
-	}
-}
-
-func PCDAntennaOff() {
-	PCDClearRegisterBitMask(TxControlReg, 0x03)
-}
 
 // PCDDumpVersionToLog get and dump the MFRC522 version
 func PCDDumpVersionToLog() {
 	// Get the MFRC522 firmware version
-	v, _ := PCDReadRegister(VersionReg);
+	v, _ := pcd.ReadRegister(pcd.VersionReg);
 
 	// Lookup which version
 	switch(v) {
@@ -407,6 +230,7 @@ func PCDDumpVersionToLog() {
 	}
 } 
 
+/*
 // PCDCalculateCRC Use the CRC coprocessor in the MFRC522 to calculate a CRC_A.
 func PCDCalculateCRC(data []byte) ([]byte, StatusCode) {
 	log.Printf("PCDCalculateCRC  | %s\n", dumpByteArray(data))	
@@ -447,11 +271,9 @@ func PCDRandomID() {
 	PCDSendCommand(PCDGenerateRandomID)		// Create random id
 	time.Sleep(time.Millisecond*100)		// give some time
 	PCDSendCommand(PCDMem)		// Move internal buffer to FIFO
-
-	
-
-
 }
+
+*/
 
 func dumpByteArray(values []byte) string {
 	var result string
