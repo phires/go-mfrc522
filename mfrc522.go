@@ -288,6 +288,14 @@ func Dispose() {
 	rpio.Close()
 }
 
+// PCDSendCommand sends a single command to MFRC522
+func PCDSendCommand(cmd PCDCommand) error {
+	log.Printf("PCDSendCommand   | Command  %#02x\n", cmd)
+	rpio.SpiTransmit(byte(CommandReg))				// MSB == 0 is for writing. LSB is not used in address. Datasheet section 8.1.2.3.
+	rpio.SpiTransmit(byte(cmd))
+	return nil
+}
+
 // PCDWriteValueRegister writes a single byte to a register
 func PCDWriteValueRegister(reg PCDRegister, value byte) error {
 	log.Printf("PCDWriteRegister | Register %#02x | Value  %#02x\n", reg, value)
@@ -429,6 +437,21 @@ func PCDCalculateCRC(data []byte) ([]byte, StatusCode) {
 		return nil, StatusTimeout
     }
 } 
+
+func PCDRandomID() {
+	log.Printf("PCDRandomID      | \n")
+	PCDSendCommand(PCDIdle)		// Stop any active command.
+	PCDWriteValueRegister(DivIrqReg, 0x04)				// Clear the CRCIRq interrupt request bit
+	PCDSetRegisterBitMask(FIFOLevelReg, 0x80)			// FlushBuffer = 1, FIFO initialization
+
+	PCDSendCommand(PCDGenerateRandomID)		// Create random id
+	time.Sleep(time.Millisecond*100)		// give some time
+	PCDSendCommand(PCDMem)		// Move internal buffer to FIFO
+
+	
+
+
+}
 
 func dumpByteArray(values []byte) string {
 	var result string
