@@ -340,7 +340,7 @@ func SelfTest() bool {
 	
 	// 7. Read out resulting 64 bytes from the FIFO buffer.
 	result, _ := ReadRegisterValues(FIFODataReg, 64, 0)
-	fmt.Printf("%s\n", helper.DumpByteArray(result))
+
 	// Auto self-test done
 	// Reset AutoTestReg register to be 0 again. Required for normal operation.
 	WriteRegisterValue(AutoTestReg, 0x00)

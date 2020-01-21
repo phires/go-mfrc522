@@ -3,7 +3,6 @@ package mfrc522
 import (
 	"github.com/stianeikeland/go-rpio/v4"
 	"github.com/phires/go-mfrc522/pcd"
-	"github.com/phires/go-mfrc522/helper"
 	"fmt"
 	"time"
 
@@ -142,7 +141,9 @@ func CalculateCRC(v []byte) ([]byte, error) {
 // SelfTest godoc
 func SelfTest() {
 	valid := pcd.SelfTest()
-	helper.Log("SelfTest", fmt.Sprintf("Validation result: %v", valid))
+	log.WithFields(log.Fields{
+		"result": valid,
+	}).Info("SelfTest")
 }
 
 
