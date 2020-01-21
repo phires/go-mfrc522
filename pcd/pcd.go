@@ -1,64 +1,159 @@
 package pcd
 
 import (
-	"log"
+	"fmt"
 	"time"
+	"bytes"
 	"github.com/stianeikeland/go-rpio/v4"
+	"github.com/phires/go-mfrc522/helper"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // SendCommand sends a single command to MFRC522
 func SendCommand(cmd Command) error {
-	log.Printf("PCDSendCommand   | Command %s [%#02x]\n", commandByteToString(cmd), cmd)
-	rpio.SpiTransmit(byte(CommandReg))				// MSB == 0 is for writing. LSB is not used in address. Datasheet section 8.1.2.3.
-	rpio.SpiTransmit(byte(cmd))
+	log.WithFields(log.Fields{
+		"cmd": fmt.Sprintf("%#02x", cmd),
+		"name": commandByteToString(cmd),
+	}).Trace("SendCommand")
+
+	data := []byte{byte(CommandReg) << 1, byte(cmd)}
+	if err := rpio.SpiBegin(rpio.Spi0); err != nil {
+		panic(err)
+	}
+	rpio.SpiTransmit(data...)
+	rpio.SpiEnd(rpio.Spi0)
+
 	return nil
 }
 
-// WriteValueRegister writes a single byte to a register
-func WriteValueRegister(reg Register, value byte) error {
-	log.Printf("PCDWriteRegister | Register %s [%#02x] to value %#02x\n", registerByteToString(reg), reg, value)
-	rpio.SpiTransmit(byte(reg))				// MSB == 0 is for writing. LSB is not used in address. Datasheet section 8.1.2.3.
-	rpio.SpiTransmit(value)
-	return nil
-} 
+// WriteRegisterValue writes a single byte to a register
+func WriteRegisterValue(reg Register, value byte) error {
+	data := []byte{byte(reg) << 1, value}		// Register needs to be shifted by 1 when using SPI
+	log.WithFields(log.Fields{
+		"register": fmt.Sprintf("%#02x", reg),
+		"name": registerByteToString(reg),
+		"value": fmt.Sprintf("%#02x", value),
+	}).Trace("WriteRegisterValue")
 
-// WriteValuesRegister Writes a number of bytes to the specified register in the MFRC522 chip.
-// The interface is described in the datasheet section 8.1.2.
-func WriteValuesRegister(reg Register, values []byte) error {
-	var count int = len(values)
-	log.Printf("PCDWriteRegister | Register %#02x | Length %d \n", reg, count)
-
-	rpio.SpiTransmit(byte(reg))				// MSB == 0 is for writing. LSB is not used in address. Datasheet section 8.1.2.3.
-	rpio.SpiTransmit(values...)
 	
+	if err := rpio.SpiBegin(rpio.Spi0); err != nil {
+		panic(err)
+	}
+	rpio.SpiTransmit(data...)
+	rpio.SpiEnd(rpio.Spi0)
+
 	return nil
 } 
 
-// ReadRegister reads a single byte from a register
-func ReadRegister(reg Register) (byte, error) {
-	buffer := []byte{ 0x80 | (byte(reg) & 0x7E) } 	// MSB == 1 is for reading. LSB is not used in address. Datasheet section 8.1.2.3.
-	rpio.SpiExchange(buffer)		
-	log.Printf("PCDReadRegister  | Register %s [%#02x] contains value %#02x\n", registerByteToString(reg), reg, buffer[0])	
-	return buffer[0], nil
+// WriteRegisterValues Writes a number of bytes to the specified register in the MFRC522 chip.
+// The interface is described in the datasheet section 8.1.2.
+func WriteRegisterValues(reg Register, values []byte) error {
+	var count int = len(values)
+	data := make([]byte, 1)
+	data[0] = byte(reg) << 1
+	data = append(data, values...)
+
+	log.WithFields(log.Fields{
+		"register": fmt.Sprintf("%#02x", reg),
+		"name": registerByteToString(reg),
+		"count": count,
+		"values": helper.DumpByteArray(data),
+	}).Trace("WriteRegisterValues")
+	
+	if err := rpio.SpiBegin(rpio.Spi0); err != nil {
+		panic(err)
+	}
+	rpio.SpiTransmit(data...)
+	rpio.SpiEnd(rpio.Spi0)
+
+	return nil
+} 
+
+// ReadRegisterValue reads a single byte from a register
+func ReadRegisterValue(reg Register) (byte, error) {
+	var r byte = byte(reg) << 1						// Register needs to be shifted by 1 when using SPI
+	buffer := []byte{ 0x80 | (r & 0x7E) } 	// MSB == 1 is for reading. LSB is not used in address. Datasheet section 8.1.2.3.
+	
+	if err := rpio.SpiBegin(rpio.Spi0); err != nil {
+		panic(err)
+	}
+	rpio.SpiTransmit(buffer...)
+	v := rpio.SpiReceive(1)
+	rpio.SpiEnd(rpio.Spi0)
+
+	log.WithFields(log.Fields{
+		"register": fmt.Sprintf("%#02x", reg),
+		"name": registerByteToString(reg),
+		"value": fmt.Sprintf("%#02x", v[0]),
+	}).Trace("ReadRegisterValue")
+
+	return v[0], nil
+} 
+
+// ReadRegisterValues reads a number of bytes from the specified register in the MFRC522 chip.
+// The interface is described in the datasheet section 8.1.2.
+func ReadRegisterValues(reg Register, count uint8, rxAlign byte) ([]byte, error) {
+	values := make([]byte, count)
+	var v []byte
+	if (count == 0) {
+		return values, nil
+	}
+	log.WithFields(log.Fields{
+		"register": fmt.Sprintf("%#02x", reg),
+		"name": registerByteToString(reg),
+		"count": count,
+		"rxAlign": fmt.Sprintf("%#02x", rxAlign),
+	}).Trace("ReadRegisterValues")
+	address := 0x80 | (byte(reg) << 1)			// MSB == 1 is for reading. LSB is not used in address. Datasheet section 8.1.2.3.
+	var index uint8 = 0							// Index in values array.
+
+	if err := rpio.SpiBegin(rpio.Spi0); err != nil {
+		panic(err)
+	}
+	//count--;								// One read is performed outside of the loop
+	//rpio.SpiTransmit(address)				// Tell MFRC522 which address we want to read
+	if (rxAlign > 0x00) {		// Only update bit positions rxAlign..7 in values[0]
+		// Create bit mask for bit positions rxAlign..7
+		var mask byte = (0xFF << rxAlign) & 0xFF
+		// Read value and tell that we want to read the same address again.
+		rpio.SpiTransmit(address)
+		v = rpio.SpiReceive(1)
+		
+		// Apply mask to both current value of values[0] and the new data in value.
+		values[0] = (values[0] & ^mask) | (v[0] & mask)
+		index = index + 1
+	}
+	
+	for ; index < count; index++ {
+		rpio.SpiTransmit(address)
+		v = rpio.SpiReceive(1)
+		values[index] = v[0]
+	}
+	
+	rpio.SpiTransmit(0x0)
+
+	rpio.SpiEnd(rpio.Spi0)
+	return values, nil
 } 
 
 // ClearRegisterBitMask  godoc
 func ClearRegisterBitMask(reg Register, mask byte) error {
-	tmp, err := ReadRegister(reg);
+	tmp, err := ReadRegisterValue(reg);
 	if err != nil {
 		return err
 	}
-	WriteValueRegister(reg, tmp & (^mask));		// clear bit mask
+	WriteRegisterValue(reg, tmp & (^mask));		// clear bit mask
 	return nil
 } 
 
 // SetRegisterBitMask  godoc
 func SetRegisterBitMask(reg Register, mask byte) error {
-	tmp, err := ReadRegister(reg);
+	tmp, err := ReadRegisterValue(reg);
 	if err != nil {
 		return err
 	}
-	WriteValueRegister(reg, tmp | mask);		
+	WriteRegisterValue(reg, tmp | mask);		
 	return nil
 } 
 
@@ -71,27 +166,208 @@ func Reset() {
 	var count uint8
 
 	for {
-		v, err := ReadRegister(CommandReg)
-		if !(v == 0x20 && count < 3) || err != nil  {
+		time.Sleep(time.Millisecond*50)
+
+		v, err := ReadRegisterValue(CommandReg)
+		if ((v & (1<<4) == 0) && count < 3) || err != nil  {
 			break
 		}
 		count = count + 1
-		time.Sleep(time.Millisecond*50)
+		
 	}
+}
+
+func ResetBaudRates() {
+	WriteRegisterValue(TxModeReg, 0x00)
+	WriteRegisterValue(RxModeReg, 0x00)
+	WriteRegisterValue(ModWidthReg, 0x26)
+
+	WriteRegisterValue(TModeReg, 0x8D)	
+	WriteRegisterValue(TPrescalerReg, 0x3E)	
+	WriteRegisterValue(TReloadRegL, 30)
+	WriteRegisterValue(TReloadRegH, 0)	
+	
+	WriteRegisterValue(TxASKReg, 0x40)		// Default 0x00. Force a 100 % ASK modulation independent of the ModGsPReg register setting
+	WriteRegisterValue(ModeReg, 0x3D)		// Default 0x3F. Set the preset value for the CRC coprocessor for the CalcCRC command to 0x6363 (ISO 14443-3 part 6.2.4)
 }
 
 // AntennaOn turns on the antenna if it is disabled currently
 func AntennaOn() {
-	value, _ := ReadRegister(TxControlReg)
-	log.Printf("AntennaOn        | Antenna status %#02x\n", value & 0x03)	
+	value, _ := ReadRegisterValue(TxControlReg)
+	log.WithFields(log.Fields{
+		"status": fmt.Sprintf("%#02x", value),
+	}).Trace("AntennaOn")
+
 	if ((value & 0x03) != 0x03) {
-		WriteValueRegister(TxControlReg, value | 0x03)
+		log.WithFields(log.Fields{
+			"action": "turnon",
+		}).Trace("AntennaOn")
+		WriteRegisterValue(TxControlReg, value | 0x03)
 	}
 }
 
 // AntennaOff turns off the antenna
 func AntennaOff() {
+	log.WithFields(log.Fields{
+		"action": "turnoff",
+	}).Trace("AntennaOff")
 	ClearRegisterBitMask(TxControlReg, 0x03)
 }
 
+// GetVersion godoc
+func GetVersion() (byte, string) {
+	v, _ := ReadRegisterValue(VersionReg);
+	var result string
+	// Lookup which version
+	switch(v) {
+	case 0x88:
+		result = "clone"
+		break
+	case 0x90: 
+		result = "v0.0"
+		break
+	case 0x91: 
+		result = "v1.0"
+		break
+	case 0x92:
+		result = "v2.0"
+		break
+	case 0x12: 
+		result = "counterfeit chip"
+		break
+	default:
+		result = "unknown"
+	}
+	// When 0x00 or 0xFF is returned, communication probably failed
+	if ((v == 0x00) || (v == 0xFF)) {
+		result = "WARNING: Communication failure, is the MFRC522 properly connected?"
+	}
 
+	return v, result
+}
+
+// CalculateCRC Use the CRC coprocessor in the MFRC522 to calculate a CRC_A.
+func CalculateCRC(data []byte) ([]byte, StatusCode) {
+	log.WithFields(log.Fields{
+		"data": helper.DumpByteArray(data),
+	}).Debug("CalculateCRC")
+	
+	SendCommand(CommandIdle)
+
+	WriteRegisterValue(DivIrqReg, 0x04)				// Clear the CRCIRq interrupt request bit
+	SetRegisterBitMask(FIFOLevelReg, 0x80)			// FlushBuffer = 1, FIFO initialization
+	WriteRegisterValues(FIFODataReg, data)			// Write data to the FIFO
+
+	SendCommand(CommandCalcCRC)
+
+	c1 := make(chan []byte, 1)
+    go func() {
+		result := make([]byte, 2)
+		for {
+			n, _ := ReadRegisterValue(DivIrqReg)
+			if n == 0x04 {							// CRCIRq bit set - calculation done
+				SendCommand(CommandIdle)					// Stop calculating CRC for new content in the FIFO.
+				// Transfer the result from the registers to the result buffer
+				result[0], _ = ReadRegisterValue(CRCResultRegL)
+				result[1], _ = ReadRegisterValue(CRCResultRegH)
+				c1 <- result;
+			}
+			time.Sleep(time.Millisecond*25)
+		}
+    }()
+	select {
+	case res := <-c1:
+		log.WithFields(log.Fields{
+			"result": helper.DumpByteArray(res),
+		}).Debug("CalculateCRC")
+
+        return res, StatusOK
+    case <-time.After(time.Millisecond*250):		// Wait 100ms for CRC calc to finish
+		return nil, StatusTimeout
+    }
+} 
+/*
+func RandomID()  ([]byte, StatusCode) {
+	SendCommand(CommandIdle)				// Stop any active command.
+	WriteRegisterValue(DivIrqReg, 0x04)		// Clear the CRCIRq interrupt request bit
+	SetRegisterBitMask(FIFOLevelReg, 0x80)	// FlushBuffer = 1, FIFO initialization
+
+	SendCommand(CommandGenerateRandomID)	// Create random id
+	time.Sleep(time.Millisecond*100)		// give some time
+	SendCommand(CommandMem)					// Move internal buffer to FIFO
+
+
+}
+*/
+
+// SelfTest follows directly the steps outlined in 16.1.1
+func SelfTest() bool {
+	// 1. Perform a soft reset.
+	Reset()
+	
+	// 2. Clear the internal buffer by writing 25 bytes of 00h
+	zeroes := make([]byte, 25)
+	WriteRegisterValue(FIFOLevelReg, 0x80)			// flush the FIFO buffer
+	WriteRegisterValues(FIFODataReg, zeroes)		// write 25 bytes of 00h to FIFO
+	SendCommand(CommandMem)						// transfer to internal buffer
+	
+	// 3. Enable self-test
+	WriteRegisterValue(AutoTestReg, 0x09)
+	
+	// 4. Write 00h to FIFO buffer
+	WriteRegisterValue(FIFODataReg, 0x00)
+	
+	// 5. Start self-test by issuing the CalcCRC command
+	SendCommand(CommandCalcCRC)
+	
+	// 6. Wait for self-test to complete
+	var n byte
+	for i := 0; i < 0xFF; i++ {
+		time.Sleep(time.Millisecond*50)		// Give the CRC computation some time
+		// The datasheet does not specify exact completion condition except
+		// that FIFO buffer should contain 64 bytes.
+		// While selftest is initiated by CalcCRC command
+		// it behaves differently from normal CRC computation,
+		// so one can't reliably use DivIrqReg to check for completion.
+		// It is reported that some devices does not trigger CRCIRq flag
+		// during selftest.
+		n, _ = ReadRegisterValue(FIFOLevelReg)
+		if (n >= 64) {
+			break
+		}
+	}
+	SendCommand(CommandIdle);		// Stop calculating CRC for new content in the FIFO.
+	
+	// 7. Read out resulting 64 bytes from the FIFO buffer.
+	result, _ := ReadRegisterValues(FIFODataReg, 64, 0)
+	fmt.Printf("%s\n", helper.DumpByteArray(result))
+	// Auto self-test done
+	// Reset AutoTestReg register to be 0 again. Required for normal operation.
+	WriteRegisterValue(AutoTestReg, 0x00)
+	
+	
+	// Determine firmware version (see section 9.3.4.8 in spec)
+	version, _ := ReadRegisterValue(VersionReg)
+	
+	// Pick the appropriate reference values
+	var valid int
+	switch (version) {
+		case 0x88:	// Fudan Semiconductor FM17522 clone
+			valid = bytes.Compare(FM17522FirmwareReference, result)
+			break;
+		case 0x90:	// Version 0.0
+			valid = bytes.Compare(FirmwareReferenceV0_0, result)
+			break;
+		case 0x91:	// Version 1.0
+			valid = bytes.Compare(FirmwareReferenceV1_0, result)
+			break;
+		case 0x92:	// Version 2.0
+			valid = bytes.Compare(FirmwareReferenceV2_0, result)
+			break;
+		default:	// Unknown version
+			return false; // abort test
+	}
+	
+	// Test passed; all is good.
+	return valid == 0;
+}
