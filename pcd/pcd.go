@@ -371,3 +371,137 @@ func SelfTest() bool {
 	// Test passed; all is good.
 	return valid == 0;
 }
+
+// SoftPowerDown godoc
+func SoftPowerDown() {
+	//Note : Only soft power down mode is available throught software
+	val, _  := ReadRegisterValue(CommandReg) 	// Read state of the command register 
+	val |= (1<<4)								// set PowerDown bit ( bit 4 ) to 1 
+	WriteRegisterValue(CommandReg, val)			//write new value to the command register
+}
+
+// SoftPowerUp godoc
+func SoftPowerUp(){
+	val, _ := ReadRegisterValue(CommandReg) 	// Read state of the command register 
+	val -= (1<<4)							// set PowerDown bit ( bit 4 ) to 0 
+	WriteRegisterValue(CommandReg, val)			// write new value to the command register
+	// wait until PowerDown bit is cleared (this indicates end of wake up procedure) 
+	c1 := make(chan bool, 1)
+	
+	go func() {
+		for {
+			n, _ := ReadRegisterValue(CommandReg)
+			if n != 0x04 {							// CRCIRq bit set - calculation done
+				SendCommand(CommandIdle)					// Stop calculating CRC for new content in the FIFO.
+				c1 <- true;
+			}
+			time.Sleep(time.Millisecond*25)
+		}
+    }()
+	select {
+	case <-c1:
+	    return 
+    case <-time.After(time.Millisecond*500):		// Wait 500ms for CRC calc to finish
+		return
+    }
+}
+
+
+// CommunicateWithPICC transfers data to the MFRC522 FIFO, executes a command, waits for completion and transfers data back from the FIFO.
+// CRC validation can only be done if backData and backLen are specified.
+func CommunicateWithPICC(command Command, waitIRq byte, sendData []byte, validBits *byte, rxAlign byte, backLen byte, checkCRC bool) ([]byte, StatusCode, error) {
+	// Prepare values for BitFramingReg
+	var result []byte
+
+	var txLastBits byte 
+	if *validBits > 0 {
+		txLastBits = *validBits
+	}
+
+	bitFraming := (rxAlign << 4) + txLastBits		// RxAlign = BitFramingReg[6..4]. TxLastBits = BitFramingReg[2..0]
+
+	SendCommand(CommandIdle)						// Stop any active command.
+	WriteRegisterValue(ComIrqReg, 0x7F)				// Clear all seven interrupt request bits
+	WriteRegisterValue(FIFOLevelReg, 0x80)			// FlushBuffer = 1, FIFO initialization
+	WriteRegisterValues(FIFODataReg, sendData)		// Write sendData to the FIFO
+	WriteRegisterValue(BitFramingReg, bitFraming)	// Bit adjustments
+	WriteRegisterValue(CommandReg, byte(command))	// Execute the command
+
+	if command == CommandTransceive {
+		SetRegisterBitMask(BitFramingReg, 0x80)		// StartSend=1, transmission of data starts
+	}
+
+	// Wait for the command to complete.
+	// In PCD_Init() we set the TAuto flag in TModeReg. This means the timer automatically starts when the PCD stops transmitting.
+	// Each iteration of the do-while-loop takes 17.86μs.
+	
+	c1 := make(chan byte, 1)
+	go func() {
+		for {
+			n, _ := ReadRegisterValue(ComIrqReg)	// ComIrqReg[7..0] bits are: Set1 TxIRq RxIRq IdleIRq HiAlertIRq LoAlertIRq ErrIRq TimerIRq
+			if (n & waitIRq) == 0 || (n & 0x01) == 0 {		// One of the interrupts that signal success has been set or TimerIRq
+				c1 <- n
+			}
+			time.Sleep(time.Millisecond*25)
+		}
+	}()
+	
+	select {
+	case res := <-c1:
+		log.WithFields(log.Fields{
+			"result": res,
+		}).Debug("CommunicateWithPICC")
+		if res == 0x01 {						// TimerIRq
+			return result, StatusTimeout, nil
+		}
+
+		break
+	case <-time.After(time.Millisecond*50):		// Wait 50ms to finish
+		return result, StatusTimeout, nil
+    }
+
+	// Stop now if any errors except collisions were detected.
+	errorRegValue, _ := ReadRegisterValue(ErrorReg); // ErrorReg[7..0] bits are: WrErr TempErr reserved BufferOvfl CollErr CRCErr ParityErr ProtocolErr
+	if errorRegValue == 0x13 {	 // BufferOvfl ParityErr ProtocolErr
+		return result, StatusError, nil
+	}
+
+	// If the caller wants data back, get it from the MFRC522.
+	if backLen > 0 {
+		n, _ := ReadRegisterValue(FIFOLevelReg);	// Number of bytes in the FIFO
+
+		if n > backLen {
+			return result, StatusNoRoom, nil
+		}
+
+		result, _ = ReadRegisterValues(FIFODataReg, n, rxAlign)	// Get received data from FIFO
+		vb, _ := ReadRegisterValue(ControlReg)			// RxLastBits[2:0] indicates the number of valid bits in the last received byte. If this value is 000b, the whole byte is valid.
+		*validBits = vb & 0x07
+	}
+
+	// Tell about collisions
+	if errorRegValue == 0x08 {		// CollErr
+		return result, StatusCollision, nil
+	}
+
+	// Perform CRC_A validation if requested.
+	if len(result) > 0 && backLen > 0 && checkCRC {
+		// In this case a MIFARE Classic NAK is not OK.
+		if (backLen == 1 && *validBits == 0x4) {
+			return result, StatusMifareNACK, nil
+		}
+		// We need at least the CRC_A value and all 8 bits of the last byte must be received.
+		if (backLen < 2 || *validBits != 0x0) {
+			return result, StatusCRCWrong, nil
+		}
+		// Verify CRC_A - do our own calculation and store the control in controlBuffer.
+		crc, status := CalculateCRC(result[:len(result)-2])
+		if status != StatusOK {
+			return result, status, nil
+		}
+		if result[len(result) - 2] != crc[0] || result[len(result) - 1] != crc[1] {
+			return result, StatusCRCWrong, nil
+		}
+	}
+	return result, StatusOK, nil
+}
