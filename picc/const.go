@@ -9,6 +9,14 @@ type MIFAREMisc byte
 // Type godoc
 type Type byte
 
+// UID is a struct used for passing the UID of a PICC.
+type UID struct {
+	Size byte			// Number of bytes in the UID. 4, 7 or 10.
+	UIDByte []byte
+	Sak byte			// The SAK (Select acknowledge) byte returned from the PICC after successful selection.
+}
+
+const MaxLength	byte = 16
 
 // Commands sent to the PICC.
 const (
@@ -35,6 +43,12 @@ const (
 	// The commands used for MIFARE Ultralight (from http://www.nxp.com/documents/data_sheet/MF0ICU1.pdf, Section 8.6)
 	// The PiccCMDMF_READ and PiccCMDMF_WRITE can also be used for MIFARE Ultralight.
 	CMDMifareULWrite	Command = 0xA2		// Writes one 4 byte page to the PICC.
+)
+
+const (
+	MIOK 		byte = 0x0
+    MINotAgErr  byte = 0x1
+    MIErr 		byte = 0x2
 )
 
 // MIFARE constants that does not fit anywhere else

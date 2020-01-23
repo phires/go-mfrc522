@@ -406,10 +406,16 @@ func SoftPowerUp(){
     }
 }
 
+// TransceiveData executes the Transceive command.
+// CRC validation can only be done if backData and backLen are specified.
+func TransceiveData(sendData []byte, validBits *byte, rxAlign byte, backLen byte, checkCRC bool) ([]byte, StatusCode, error) {
+	// RxIRq and IdleIRq
+	return CommunicateWithPICC(byte(CommandTransceive), 0x30, sendData, validBits, rxAlign, backLen, checkCRC)
+}
 
 // CommunicateWithPICC transfers data to the MFRC522 FIFO, executes a command, waits for completion and transfers data back from the FIFO.
 // CRC validation can only be done if backData and backLen are specified.
-func CommunicateWithPICC(command Command, waitIRq byte, sendData []byte, validBits *byte, rxAlign byte, backLen byte, checkCRC bool) ([]byte, StatusCode, error) {
+func CommunicateWithPICC(command byte, waitIRq byte, sendData []byte, validBits *byte, rxAlign byte, backLen byte, checkCRC bool) ([]byte, StatusCode, error) {
 	// Prepare values for BitFramingReg
 	var result []byte
 
@@ -427,7 +433,7 @@ func CommunicateWithPICC(command Command, waitIRq byte, sendData []byte, validBi
 	WriteRegisterValue(BitFramingReg, bitFraming)	// Bit adjustments
 	WriteRegisterValue(CommandReg, byte(command))	// Execute the command
 
-	if command == CommandTransceive {
+	if command == byte(CommandTransceive) {
 		SetRegisterBitMask(BitFramingReg, 0x80)		// StartSend=1, transmission of data starts
 	}
 

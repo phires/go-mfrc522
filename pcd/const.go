@@ -107,6 +107,7 @@ const (
 	StatusInternalError		StatusCode = 0x05	// Internal error in the code. Should not happen ;-)
 	StatusInvalid			StatusCode = 0x06	// Invalid argument.
 	StatusCRCWrong			StatusCode = 0x07	// The CRC_A does not match
+	StatusMINotAgErr		StatusCode = 0x08	// 
 	StatusMifareNACK		StatusCode = 0xff	// A MIFARE PICC responded with NAK.
 )
 

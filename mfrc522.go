@@ -3,6 +3,7 @@ package mfrc522
 import (
 	"github.com/stianeikeland/go-rpio/v4"
 	"github.com/phires/go-mfrc522/pcd"
+	"github.com/phires/go-mfrc522/picc"
 	"fmt"
 	"time"
 
@@ -147,3 +148,24 @@ func SelfTest() {
 }
 
 
+// ReadIDnoBlock godoc
+func ReadIDnoBlock() (int, error) {
+	_, err := picc.Request(byte(picc.CMDReqA))
+	if err != nil {
+		log.WithFields(log.Fields{
+			"action": "Request",
+			"err": err,
+		}).Error("ReadIDnoBlock")
+		return 0, err
+	}
+
+	v, err := picc.Anticoll()
+	if err != nil {
+		log.WithFields(log.Fields{
+			"action": "Anticoll",
+			"err": err,
+		}).Error("ReadIDnoBlock")
+		return 0, err
+	}
+	return picc.UIDtoNum(v), nil
+}
